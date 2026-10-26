@@ -2,24 +2,33 @@ import Phaser from 'phaser';
 import {
   ICON_BAT_TEXTURE,
   ICON_BOTTLE_TEXTURE,
+  ICON_KNIFE_TEXTURE,
   ICON_PIPE_TEXTURE,
   WEAPON_BAT_TEXTURE,
   WEAPON_BOTTLE_TEXTURE,
+  WEAPON_KNIFE_TEXTURE,
   WEAPON_PIPE_TEXTURE
 } from './WeaponTextures';
 
-export type WeaponKind = 'pipe' | 'bottle' | 'bat';
+export type WeaponKind = 'pipe' | 'bottle' | 'bat' | 'knife';
+export type ThrowableWeaponKind = 'bottle' | 'knife';
 
 export interface WeaponDefinition {
   texture: string;
   iconTexture: string;
   label: string;
-  /** Successful impacts before the weapon breaks. */
+  /** Successful impacts for melee weapons, or throws for throwables. */
   uses: number;
-  /** Damage dealt by a normal weapon swing. */
+  /** Damage dealt by a melee swing or by the thrown projectile. */
   damage: number;
+  /** Throwables are consumed whole on the release frame. */
+  throwable: boolean;
   bodyWidth: number;
   bodyHeight: number;
+}
+
+export function isThrowableWeapon(kind: WeaponKind): kind is ThrowableWeaponKind {
+  return kind === 'bottle' || kind === 'knife';
 }
 
 export const WEAPON_DEFINITIONS: Record<WeaponKind, WeaponDefinition> = {
@@ -29,15 +38,17 @@ export const WEAPON_DEFINITIONS: Record<WeaponKind, WeaponDefinition> = {
     label: 'TUBERÍA',
     uses: 5,
     damage: 30,
-    bodyWidth: 24,
-    bodyHeight: 10
+    throwable: false,
+    bodyWidth: 26,
+    bodyHeight: 12
   },
   bottle: {
     texture: WEAPON_BOTTLE_TEXTURE,
     iconTexture: ICON_BOTTLE_TEXTURE,
     label: 'BOTELLA',
-    uses: 3,
-    damage: 45,
+    uses: 1,
+    damage: 35,
+    throwable: true,
     bodyWidth: 10,
     bodyHeight: 10
   },
@@ -45,9 +56,20 @@ export const WEAPON_DEFINITIONS: Record<WeaponKind, WeaponDefinition> = {
     texture: WEAPON_BAT_TEXTURE,
     iconTexture: ICON_BAT_TEXTURE,
     label: 'BATE',
-    uses: 4,
+    uses: 5,
     damage: 40,
+    throwable: false,
     bodyWidth: 28,
+    bodyHeight: 12
+  },
+  knife: {
+    texture: WEAPON_KNIFE_TEXTURE,
+    iconTexture: ICON_KNIFE_TEXTURE,
+    label: 'CUCHILLO',
+    uses: 1,
+    damage: 35,
+    throwable: true,
+    bodyWidth: 14,
     bodyHeight: 8
   }
 };

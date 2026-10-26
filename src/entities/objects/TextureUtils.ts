@@ -197,6 +197,117 @@ function sliceRegion(scene: Phaser.Scene, source: CanvasImageSource, region: She
   texture.refresh();
 }
 
+function keyedCrop(
+  source: CanvasImageSource,
+  region: SheetRegion
+): HTMLCanvasElement {
+  // Key at full resolution first: scaling first would blend the chroma key into
+  // the silhouette and leave a coloured border after the alpha is removed.
+  const scratch = document.createElement('canvas');
+  scratch.width = region.width;
+  scratch.height = region.height;
+
+  const scratchContext = scratch.getContext('2d');
+  if (!scratchContext) {
+    throw new Error(`No 2D context available while slicing ${region.key}`);
+  }
+
+  scratchContext.drawImage(
+    source,
+    region.x,
+    region.y,
+    region.width,
+    region.height,
+    0,
+    0,
+    region.width,
+    region.height
+  );
+  keyMagenta(scratchContext, region.width, region.height);
+
+  if (region.keyBlue) {
+    keyBlue(scratchContext, region.width, region.height);
+  }
+
+  return scratch;
+}
+
+export interface RotationSheetConfig {
+  /** Key of the spritesheet texture that will be created. */
+  key: string;
+  /** Square frame size baked into the spritesheet. */
+  frameWidth: number;
+  frameHeight: number;
+  /** Longest side of the artwork inside a frame, in game pixels. */
+  contentSize: number;
+  /** Ordered rotation frames, from the same source sheet. */
+  regions: readonly SheetRegion[];
+}
+
+/**
+ * Packs several keyed crops into a uniform spritesheet. Every crop is scaled by
+ * the same factor and centred in its frame, so playing the frames back as an
+ * animation spins the object around a stable centre.
+ *
+ * Used for the bottle/knife projectile rotation frames.
+ */
+export function createRotationSheet(
+  scene: Phaser.Scene,
+  sheetKey: string,
+  config: RotationSheetConfig
+): void {
+  if (scene.textures.exists(config.key)) {
+    return;
+  }
+
+  if (!scene.textures.exists(sheetKey)) {
+    throw new Error(
+      `Texture "${sheetKey}" is missing. Load it in preload() before slicing it.`
+    );
+  }
+
+  if (config.regions.length === 0) {
+    throw new Error(`No rotation regions supplied for ${config.key}`);
+  }
+
+  const source = scene.textures.get(sheetKey).getSourceImage() as CanvasImageSource;
+  const longestSide = Math.max(
+    ...config.regions.map((region) => Math.max(region.width, region.height))
+  );
+  const scale = config.contentSize / longestSide;
+
+  const output = document.createElement('canvas');
+  output.width = config.frameWidth * config.regions.length;
+  output.height = config.frameHeight;
+
+  const context = output.getContext('2d');
+  if (!context) {
+    throw new Error(`No 2D context available while building ${config.key}`);
+  }
+
+  config.regions.forEach((region, index) => {
+    const crop = keyedCrop(source, region);
+    const width = Math.max(1, Math.round(region.width * scale));
+    const height = Math.max(1, Math.round(region.height * scale));
+    const scaled = downscale(crop, width, height);
+
+    const x = index * config.frameWidth + Math.round((config.frameWidth - width) / 2);
+    const y = Math.round((config.frameHeight - height) / 2);
+
+    context.imageSmoothingEnabled = false;
+    context.drawImage(scaled, x, y);
+  });
+
+  scene.textures.addSpriteSheet(
+    config.key,
+    output as unknown as HTMLImageElement,
+    {
+      frameWidth: config.frameWidth,
+      frameHeight: config.frameHeight
+    }
+  );
+}
+
 /**
  * Bakes every region of a loaded sheet into its own canvas texture. Safe to
  * call on scene restarts: existing textures are left untouched.

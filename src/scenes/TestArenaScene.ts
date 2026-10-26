@@ -7,15 +7,27 @@ import {
 import { Merdellon } from '../entities/enemies/Merdellon';
 import { BreakableObject, type BreakableKind } from '../entities/objects/BreakableObject';
 import { PickupItem, type PickupKind } from '../entities/objects/PickupItem';
-import { createPropTextures, PROP_SHEET_KEY } from '../entities/objects/PropTextures';
+import {
+  createPropTextures,
+  DEBRIS_WOOD_TEXTURE,
+  PROP_SHEET_KEY
+} from '../entities/objects/PropTextures';
 import {
   WeaponItem,
   WEAPON_DEFINITIONS,
   type WeaponKind
 } from '../entities/objects/WeaponItem';
 import {
+  PROJECTILE_BOTTLE_ANIM,
+  PROJECTILE_KNIFE_ANIM,
+  WeaponProjectile
+} from '../entities/objects/WeaponProjectile';
+import {
   createWeaponTextures,
   GLASS_SHARD_TEXTURE,
+  METAL_SPARK_TEXTURE,
+  PROJECTILE_BOTTLE_TEXTURE,
+  PROJECTILE_KNIFE_TEXTURE,
   WEAPONS_SHEET_KEY
 } from '../entities/objects/WeaponTextures';
 import { HUD } from '../ui/HUD';
@@ -68,11 +80,12 @@ const WEAPON_LAYOUT: ReadonlyArray<{
   { x: 150, y: 214, kind: 'pipe' },
   { x: 352, y: 166, kind: 'bottle' },
   { x: 430, y: 238, kind: 'bat' },
-  { x: 520, y: 150, kind: 'bat' },
+  { x: 520, y: 150, kind: 'knife' },
+  { x: 640, y: 210, kind: 'knife' },
   { x: 760, y: 238, kind: 'bottle' },
   { x: 1080, y: 168, kind: 'pipe' },
   { x: 1200, y: 238, kind: 'bat' },
-  { x: 1340, y: 164, kind: 'bottle' }
+  { x: 1340, y: 164, kind: 'knife' }
 ];
 
 type CollisionObject =
@@ -116,6 +129,11 @@ export class TestArenaScene extends Phaser.Scene {
     WeaponItem,
     Phaser.Physics.Arcade.Collider
   >();
+  private readonly projectiles: WeaponProjectile[] = [];
+  private readonly projectileOverlaps = new Map<
+    WeaponProjectile,
+    Phaser.Physics.Arcade.Collider[]
+  >();
   private readonly pickupOverlaps = new Map<
     PickupItem,
     Phaser.Physics.Arcade.Collider
@@ -124,8 +142,6 @@ export class TestArenaScene extends Phaser.Scene {
 
   private goText!: Phaser.GameObjects.Text;
   private goTween?: Phaser.Tweens.Tween;
-  private weaponHintText?: Phaser.GameObjects.Text;
-  private weaponHintTween?: Phaser.Tweens.Tween;
 
   private soundFX!: SoundFX;
   private hud!: HUD;
@@ -148,6 +164,10 @@ export class TestArenaScene extends Phaser.Scene {
       frameWidth: 96,
       frameHeight: 96
     });
+    this.load.spritesheet('joseph-weapons', 'assets/sprites/joseph_weapons.png', {
+      frameWidth: 96,
+      frameHeight: 96
+    });
     this.load.spritesheet('enemy', 'assets/sprites/enemy.png', {
       frameWidth: 96,
       frameHeight: 96
@@ -157,9 +177,9 @@ export class TestArenaScene extends Phaser.Scene {
   }
 
   create(): void {
-    this.createAnimations();
     createPropTextures(this);
     createWeaponTextures(this);
+    this.createAnimations();
 
     // Streak-level backdrop. The 720x270 street is repeated across the wider
     // level. Offsetting the tile places the texture seam on the camera-lock
@@ -202,7 +222,7 @@ export class TestArenaScene extends Phaser.Scene {
     this.add.text(
       8,
       WORLD_HEIGHT - 8,
-      'TECLADO: WASD mover / J atacar o usar el arma\nMANDO: stick mover / botón A atacar o usar el arma\nSALTO: Espacio/K / B · AÉREO: J/A en el aire\nESPECIAL: U o J+K / Y o A+B',
+      'TECLADO: WASD mover / J atacar\nMANDO: stick mover / botón A atacar\nSALTO: Espacio/K / B · AÉREO: J/A en el aire\nESPECIAL: U o J+K / Y o A+B',
       {
         fontFamily: 'monospace',
         fontSize: '10px',
@@ -249,21 +269,21 @@ export class TestArenaScene extends Phaser.Scene {
       const x = this.player.x;
       const y = this.player.getGroundY();
 
-      if (kind === 'bottle') {
-        this.spawnGlassShards(x, y, reason === 'broken' ? 12 : 6);
+      if (kind === 'bottle' && reason === 'broken') {
+        this.spawnGlassShards(x, y, 12);
+      }
+
+      if (kind === 'bat' && reason === 'broken') {
+        this.spawnWoodSplinters(x, y, 12);
+        this.soundFX.playBreak();
       }
 
       if (reason === 'dropped' && usesRemaining > 0) {
         this.spawnWeaponItem(x, y, kind, usesRemaining, 700, true);
       }
-
-      const label = WEAPON_DEFINITIONS[kind].label;
-      this.showFloatingText(
-        x,
-        y - 42,
-        reason === 'broken' ? `${label} ROTO` : `${label} SUELTO`,
-        reason === 'broken' ? '#ffb199' : '#ffd24a'
-      );
+    };
+    this.player.onWeaponThrown = (kind, x, y, direction) => {
+      this.spawnProjectile(kind, x, y, direction);
     };
 
     // Breakable recovery props and their pickups.
@@ -275,6 +295,7 @@ export class TestArenaScene extends Phaser.Scene {
       this.player.onHealthChanged = undefined;
       this.player.onWeaponChanged = undefined;
       this.player.onWeaponLost = undefined;
+      this.player.onWeaponThrown = undefined;
       for (const overlap of this.pickupOverlaps.values()) {
         overlap.destroy();
       }
@@ -283,10 +304,18 @@ export class TestArenaScene extends Phaser.Scene {
         overlap.destroy();
       }
       this.weaponOverlaps.clear();
-      this.weaponHintTween?.stop();
-      this.weaponHintTween = undefined;
-      this.weaponHintText?.destroy();
-      this.weaponHintText = undefined;
+      for (const colliders of this.projectileOverlaps.values()) {
+        for (const collider of colliders) {
+          collider.destroy();
+        }
+      }
+      this.projectileOverlaps.clear();
+      for (const projectile of [...this.projectiles]) {
+        if (projectile.active) {
+          projectile.destroy();
+        }
+      }
+      this.projectiles.length = 0;
       this.hud.destroy();
       this.soundFX.destroy();
     });
@@ -316,6 +345,16 @@ export class TestArenaScene extends Phaser.Scene {
     for (const item of this.weaponOverlaps.keys()) {
       if (item.active) {
         item.updatePickupAvailability(this.player.x, this.player.y);
+      }
+    }
+
+    // Projectiles that leave the level are removed before their lifetime ends.
+    for (const projectile of [...this.projectiles]) {
+      if (
+        projectile.active &&
+        (projectile.x < -60 || projectile.x > WORLD_WIDTH + 60)
+      ) {
+        projectile.destroy();
       }
     }
   }
@@ -402,70 +441,144 @@ export class TestArenaScene extends Phaser.Scene {
     }
 
     this.player.equipWeapon(item.kind, item.uses);
+    this.player.playPickup();
     this.soundFX.playPickup();
-    this.showWeaponHint(item.label, item.uses);
     item.collect();
   }
 
-  /**
-   * Short on-screen reminder that the equipped weapon is used with the normal
-   * attack button, not with a separate key.
-   */
-  private showWeaponHint(label: string, uses: number): void {
-    this.weaponHintTween?.stop();
-    this.weaponHintTween = undefined;
-    this.weaponHintText?.destroy();
-    this.weaponHintText = undefined;
+  private spawnProjectile(
+    kind: 'bottle' | 'knife',
+    x: number,
+    y: number,
+    direction: number
+  ): void {
+    const projectile = new WeaponProjectile(this, x, y, kind, direction);
+    this.projectiles.push(projectile);
 
-    const text = this.add
-      .text(
-        VIEW_WIDTH / 2,
-        WORLD_HEIGHT - 76,
-        `${label} x${uses}\nJ / A PARA ATACAR`,
-        {
-          fontFamily: 'monospace',
-          fontSize: '10px',
-          fontStyle: 'bold',
-          color: '#ffd24a',
-          align: 'center',
-          lineSpacing: 2,
-          stroke: '#000000',
-          strokeThickness: 3
-        }
-      )
-      .setOrigin(0.5)
-      .setScrollFactor(0)
-      .setDepth(HUD_DEPTH - 1)
-      .setShadow(1, 1, '#000000', 0);
+    for (const enemy of this.enemies) {
+      if (enemy.active && enemy.isAlive()) {
+        this.registerProjectileEnemyOverlap(projectile, enemy);
+      }
+    }
 
-    this.weaponHintText = text;
-    this.weaponHintTween = this.tweens.add({
-      targets: text,
-      alpha: 0,
-      delay: 1800,
-      duration: 500,
-      ease: 'Quad.easeIn',
-      onComplete: () => {
-        text.destroy();
-        if (this.weaponHintText === text) {
-          this.weaponHintText = undefined;
+    projectile.once(Phaser.GameObjects.Events.DESTROY, () => {
+      const index = this.projectiles.indexOf(projectile);
+      if (index !== -1) {
+        this.projectiles.splice(index, 1);
+      }
+
+      const colliders = this.projectileOverlaps.get(projectile);
+      if (colliders) {
+        for (const collider of colliders) {
+          collider.destroy();
         }
-        this.weaponHintTween = undefined;
+        this.projectileOverlaps.delete(projectile);
       }
     });
   }
 
-  /**
-   * Spends one weapon use when a swing connects. A bottle also sprays a few
-   * glass slivers on every impact; the final break is handled by the
-   * onWeaponLost callback.
-   */
-  private registerWeaponImpact(x: number, y: number): void {
-    const weaponKind = this.player.getWeapon()?.kind;
-    this.player.registerWeaponImpact();
+  private registerProjectileEnemyOverlap(
+    projectile: WeaponProjectile,
+    enemy: Merdellon
+  ): void {
+    const overlap = this.physics.add.overlap(
+      projectile,
+      enemy,
+      () => this.onProjectileHitEnemy(projectile, enemy),
+      undefined,
+      this
+    );
 
-    if (weaponKind === 'bottle') {
-      this.spawnGlassShards(x, y, 4);
+    const colliders = this.projectileOverlaps.get(projectile);
+    if (colliders) {
+      colliders.push(overlap);
+    } else {
+      this.projectileOverlaps.set(projectile, [overlap]);
+    }
+  }
+
+  private onProjectileHitEnemy(
+    projectile: WeaponProjectile,
+    enemy: Merdellon
+  ): void {
+    if (
+      !projectile.active ||
+      projectile.isConsumed() ||
+      !enemy.active ||
+      !enemy.isAlive()
+    ) {
+      return;
+    }
+
+    const direction =
+      (projectile.body as Phaser.Physics.Arcade.Body).velocity.x >= 0 ? 1 : -1;
+    const impactX = projectile.x;
+    const impactY = projectile.y;
+
+    if (!projectile.consume()) {
+      return;
+    }
+
+    enemy.takeProjectileDamage(projectile.damage, direction);
+    this.soundFX.playHit();
+    if (enemy.getHealth() === 0) {
+      this.soundFX.playEnemyDeath();
+    }
+    this.refreshEnemyPanel(enemy);
+
+    if (projectile.kind === 'bottle') {
+      this.spawnGlassShards(impactX, impactY, 14);
+    } else {
+      this.spawnMetalSparks(impactX, impactY, 10);
+    }
+  }
+
+  /**
+   * Spends one melee weapon use when a swing connects. Throwables are spent
+   * on their release frame instead.
+   */
+  private registerWeaponImpact(_x: number, _y: number): void {
+    this.player.registerWeaponImpact();
+  }
+
+  private spawnMetalSparks(x: number, y: number, count: number): void {
+    for (let i = 0; i < count; i++) {
+      const startX = x + Phaser.Math.Between(-4, 4);
+      const startY = y + Phaser.Math.Between(-6, 6);
+      const endX = startX + Phaser.Math.Between(-26, 26);
+      const endY = y + Phaser.Math.Between(-18, 14);
+      const duration = Phaser.Math.Between(150, 320);
+      const startAngle = Phaser.Math.Between(0, 360);
+      const spin = Phaser.Math.Between(-720, 720);
+
+      const spark = this.add
+        .image(startX, startY, METAL_SPARK_TEXTURE)
+        .setDepth(y + 1)
+        .setAngle(startAngle)
+        .setScale(Phaser.Math.FloatBetween(0.6, 1.15));
+
+      this.tweens.addCounter({
+        from: 0,
+        to: 1,
+        duration,
+        ease: 'Quad.easeOut',
+        onUpdate: (tween) => {
+          const t = tween.getValue() ?? 0;
+          const fadeStart = 0.55;
+          const alpha =
+            t <= fadeStart ? 1 : 1 - (t - fadeStart) / (1 - fadeStart);
+
+          spark.setPosition(
+            Phaser.Math.Linear(startX, endX, t),
+            Phaser.Math.Linear(startY, endY, t)
+          );
+          spark.setAngle(startAngle + spin * t);
+          spark.setAlpha(alpha);
+        },
+        onComplete: () => {
+          spark.destroy();
+        }
+      });
     }
   }
 
@@ -509,6 +622,51 @@ export class TestArenaScene extends Phaser.Scene {
         },
         onComplete: () => {
           shard.destroy();
+        }
+      });
+    }
+  }
+
+  private spawnWoodSplinters(x: number, y: number, count: number): void {
+    for (let i = 0; i < count; i++) {
+      const startX = x + Phaser.Math.Between(-10, 10);
+      const startY = y - Phaser.Math.Between(6, 26);
+      const endX = startX + Phaser.Math.Between(-40, 40);
+      const endY = y + Phaser.Math.Between(-2, 3);
+      const peak = Phaser.Math.Between(14, 30);
+      const duration = Phaser.Math.Between(360, 600);
+      const startAngle = Phaser.Math.Between(0, 360);
+      const spin = Phaser.Math.Between(-560, 560);
+
+      const splinter = this.add
+        .image(startX, startY, DEBRIS_WOOD_TEXTURE)
+        .setDepth(y + 0.9)
+        .setAngle(startAngle)
+        .setScale(Phaser.Math.FloatBetween(0.7, 1.3))
+        .setFlipX(Math.random() < 0.5)
+        .setFlipY(Math.random() < 0.5);
+
+      this.tweens.addCounter({
+        from: 0,
+        to: 1,
+        duration,
+        ease: 'Linear',
+        onUpdate: (tween) => {
+          const t = tween.getValue() ?? 0;
+          const fadeStart = 0.68;
+          const alpha =
+            t <= fadeStart ? 1 : 1 - (t - fadeStart) / (1 - fadeStart);
+
+          splinter.setPosition(
+            Phaser.Math.Linear(startX, endX, t),
+            Phaser.Math.Linear(startY, endY, t) -
+              Math.sin(Math.PI * t) * peak
+          );
+          splinter.setAngle(startAngle + spin * t);
+          splinter.setAlpha(alpha);
+        },
+        onComplete: () => {
+          splinter.destroy();
         }
       });
     }
@@ -850,6 +1008,13 @@ export class TestArenaScene extends Phaser.Scene {
       breakableKnockdownOverlap
     ]);
 
+    // Projectiles already in flight can hit enemies that spawn later.
+    for (const projectile of this.projectiles) {
+      if (projectile.active && !projectile.isConsumed()) {
+        this.registerProjectileEnemyOverlap(projectile, enemy);
+      }
+    }
+
     enemy.once(Phaser.GameObjects.Events.DESTROY, () => this.onEnemyDestroyed(enemy));
   }
 
@@ -957,11 +1122,22 @@ export class TestArenaScene extends Phaser.Scene {
       'joseph-run',
       'joseph-attack',
       'joseph-hurt',
+      'joseph-pickup',
+      'joseph-idle-pipe',
+      'joseph-idle-bat',
+      'joseph-idle-bottle',
+      'joseph-idle-knife',
+      'joseph-attack-pipe',
+      'joseph-attack-bat',
+      'joseph-throw-bottle',
+      'joseph-throw-knife',
       'joseph-jump-up',
       'joseph-jump-apex',
       'joseph-jump-down',
       'joseph-jump-land',
       'joseph-jump-slash',
+      'projectile-bottle-spin',
+      'projectile-knife-spin',
       'enemy-idle',
       'enemy-walk',
       'enemy-attack',
@@ -1003,6 +1179,95 @@ export class TestArenaScene extends Phaser.Scene {
       frames: this.anims.generateFrameNumbers('joseph', { start: 18, end: 22 }),
       frameRate: 10,
       repeat: 0
+    });
+
+    // Weapon sheet v5 (4x5 grid of 96x96 frames). Frames 0-3 pickup, 4-7 pipe
+    // swing, 8-11 bat swing, 12-15 bottle throw, 16-19 knife throw.
+    this.anims.create({
+      key: 'joseph-pickup',
+      frames: this.anims.generateFrameNumbers('joseph-weapons', { start: 0, end: 3 }),
+      frameRate: 12,
+      repeat: 0
+    });
+
+    // Holding a street weapon uses that weapon's ready pose as the idle. The
+    // base joseph-idle belongs to the katana sheet and would show the wrong
+    // stance while Joseph carries a bottle, knife, pipe or bat.
+    this.anims.create({
+      key: 'joseph-idle-pipe',
+      frames: this.anims.generateFrameNumbers('joseph-weapons', { start: 7, end: 7 }),
+      frameRate: 1,
+      repeat: -1
+    });
+
+    this.anims.create({
+      key: 'joseph-idle-bat',
+      frames: this.anims.generateFrameNumbers('joseph-weapons', { start: 11, end: 11 }),
+      frameRate: 1,
+      repeat: -1
+    });
+
+    this.anims.create({
+      key: 'joseph-idle-bottle',
+      frames: this.anims.generateFrameNumbers('joseph-weapons', { start: 12, end: 12 }),
+      frameRate: 1,
+      repeat: -1
+    });
+
+    this.anims.create({
+      key: 'joseph-idle-knife',
+      frames: this.anims.generateFrameNumbers('joseph-weapons', { start: 16, end: 16 }),
+      frameRate: 1,
+      repeat: -1
+    });
+
+    this.anims.create({
+      key: 'joseph-attack-pipe',
+      frames: this.anims.generateFrameNumbers('joseph-weapons', { start: 4, end: 7 }),
+      frameRate: 15,
+      repeat: 0
+    });
+
+    this.anims.create({
+      key: 'joseph-attack-bat',
+      frames: this.anims.generateFrameNumbers('joseph-weapons', { start: 8, end: 11 }),
+      frameRate: 15,
+      repeat: 0
+    });
+
+    this.anims.create({
+      key: 'joseph-throw-bottle',
+      frames: this.anims.generateFrameNumbers('joseph-weapons', { start: 12, end: 15 }),
+      frameRate: 18,
+      repeat: 0
+    });
+
+    this.anims.create({
+      key: 'joseph-throw-knife',
+      frames: this.anims.generateFrameNumbers('joseph-weapons', { start: 16, end: 19 }),
+      frameRate: 18,
+      repeat: 0
+    });
+
+    // Four-frame rotation sheets for the thrown objects.
+    this.anims.create({
+      key: PROJECTILE_BOTTLE_ANIM,
+      frames: this.anims.generateFrameNumbers(PROJECTILE_BOTTLE_TEXTURE, {
+        start: 0,
+        end: 3
+      }),
+      frameRate: 24,
+      repeat: -1
+    });
+
+    this.anims.create({
+      key: PROJECTILE_KNIFE_ANIM,
+      frames: this.anims.generateFrameNumbers(PROJECTILE_KNIFE_TEXTURE, {
+        start: 0,
+        end: 3
+      }),
+      frameRate: 24,
+      repeat: -1
     });
 
     // Jump cycle: 1 rise, 2 apex, 3 fall, 4 landing.
@@ -1096,7 +1361,15 @@ export class TestArenaScene extends Phaser.Scene {
     }
 
     const damage = this.player.getAttackDamage(KATANA_DAMAGE);
-    target.takeDamage(damage, this.player.getFacingDirection());
+    const direction = this.player.getFacingDirection();
+
+    // The bat trades a little reach for a heavy knockdown.
+    if (this.player.isBatSwing()) {
+      target.takeBatDamage(damage, direction);
+    } else {
+      target.takeDamage(damage, direction);
+    }
+
     this.registerWeaponImpact(target.x, target.y - 16);
     this.soundFX.playHit();
     if (target.getHealth() === 0) {

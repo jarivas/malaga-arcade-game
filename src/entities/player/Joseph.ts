@@ -1,7 +1,12 @@
 import Phaser from 'phaser';
 import type { DamageData, Team } from '../../types/combat';
 import type { SoundFX } from '../../audio/SoundFX';
-import { WEAPON_DEFINITIONS, type WeaponKind } from '../objects/WeaponItem';
+import {
+  isThrowableWeapon,
+  WEAPON_DEFINITIONS,
+  type ThrowableWeaponKind,
+  type WeaponKind
+} from '../objects/WeaponItem';
 
 export interface EquippedWeapon {
   kind: WeaponKind;
@@ -33,6 +38,10 @@ const DEPTH_BIAS = 0.5;
 const HITBOX_WIDTH = 76;
 const HITBOX_HEIGHT = 40;
 const HITBOX_FORWARD_OFFSET = 32;
+// The bat swings wider and reaches 75 px in front of Joseph.
+const BAT_HITBOX_WIDTH = 75;
+const BAT_HITBOX_HEIGHT = 46;
+const BAT_HITBOX_FORWARD_OFFSET = 38;
 
 // Devastating 360-degree katana spin.
 const SPECIAL_DURATION_MS = 400;
@@ -65,7 +74,8 @@ export const JOSEPH_JUMP_ATTACK_DAMAGE = 35;
 const WEAPON_SWING_COLORS: Record<WeaponKind, number> = {
   pipe: 0xbfd6e6,
   bottle: 0x9fe08a,
-  bat: 0xe0a45a
+  bat: 0xe0a45a,
+  knife: 0xd8e4f0
 };
 
 const GAMEPAD_DEADZONE = 0.25;
@@ -107,7 +117,10 @@ export class Joseph extends Phaser.Physics.Arcade.Sprite {
 
   private groundY: number;
   private wasGamepadJumpDown = false;
-  private attackAnimationType: 'normal' | 'jump' | 'special' | null = null;
+  private attackAnimationType: 'normal' | 'jump' | 'special' | 'throw' | null = null;
+  private isPickingUp = false;
+  private isThrowing = false;
+  private throwReleased = false;
   private readonly jumpShadow: Phaser.GameObjects.Ellipse;
   private readonly jumpAttackHitbox: Phaser.GameObjects.Zone;
   private readonly jumpAttackHitTargets: Set<Phaser.GameObjects.GameObject> = new Set<Phaser.GameObjects.GameObject>();
@@ -134,8 +147,23 @@ export class Joseph extends Phaser.Physics.Arcade.Sprite {
     reason: 'broken' | 'dropped'
   ) => void;
 
+  /**
+   * Callback invoked on the release frame of a throw. The scene spawns the
+   * straight-flying projectile from the supplied position and facing.
+   */
+  public onWeaponThrown?: (
+    kind: ThrowableWeaponKind,
+    x: number,
+    y: number,
+    direction: number
+  ) => void;
+
   private currentWeapon: EquippedWeapon | null = null;
   private weaponHitThisAttack = false;
+  // Weapon used by the swing in progress. Survives the bat breaking mid-swing
+  // so the rest of the arc still deals bat damage and knocks enemies down.
+  private swingWeaponKind: WeaponKind | null = null;
+  private hitboxForwardOffset = HITBOX_FORWARD_OFFSET;
 
   private readonly keys: JosephKeys;
   private readonly hitbox: Phaser.GameObjects.Zone;
@@ -235,7 +263,10 @@ export class Joseph extends Phaser.Physics.Arcade.Sprite {
     } else if (this.isAttacking) {
       // Keep the active hitbox in front of Joseph while the lunge moves him
       const direction: number = this.getFacingDirection();
-      this.hitbox.setPosition(this.x + direction * HITBOX_FORWARD_OFFSET, this.y - 18);
+      this.hitbox.setPosition(
+        this.x + direction * this.hitboxForwardOffset,
+        this.y - 18
+      );
     }
   }
 
@@ -272,7 +303,7 @@ export class Joseph extends Phaser.Physics.Arcade.Sprite {
   }
 
   private handleMovement(): void {
-    if (this.isAttacking || this.isSpecialAttacking || this.isHurt) {
+    if (this.isAttacking || this.isSpecialAttacking || this.isHurt || this.isPickingUp) {
       return; // Keep lunge / special / knockback velocity while busy
     }
 
@@ -333,7 +364,8 @@ export class Joseph extends Phaser.Physics.Arcade.Sprite {
       this.isSpecialAttacking ||
       this.isHurt ||
       this.isJumping ||
-      this.isLanding
+      this.isLanding ||
+      this.isPickingUp
     ) {
       return;
     }
@@ -347,8 +379,30 @@ export class Joseph extends Phaser.Physics.Arcade.Sprite {
         this.play('joseph-run');
       }
       this.setFlipX(velocity.x < 0);
-    } else if (currentKey !== 'joseph-idle') {
-      this.play('joseph-idle');
+    } else {
+      const idleKey = this.getIdleAnimationKey();
+      if (currentKey !== idleKey) {
+        this.play(idleKey);
+      }
+    }
+  }
+
+  /**
+   * The base idle belongs to the katana sheet. While Joseph carries a street
+   * weapon, use that weapon's ready pose so the idle matches what he holds.
+   */
+  private getIdleAnimationKey(): string {
+    switch (this.currentWeapon?.kind) {
+      case 'pipe':
+        return 'joseph-idle-pipe';
+      case 'bat':
+        return 'joseph-idle-bat';
+      case 'bottle':
+        return 'joseph-idle-bottle';
+      case 'knife':
+        return 'joseph-idle-knife';
+      default:
+        return 'joseph-idle';
     }
   }
 
@@ -367,6 +421,7 @@ export class Joseph extends Phaser.Physics.Arcade.Sprite {
       this.isAttacking ||
       this.isSpecialAttacking ||
       this.isHurt ||
+      this.isPickingUp ||
       currentTime < this.lastAttackTime + ATTACK_COOLDOWN_MS
     ) {
       this.wasGamepadAttackDown = this.isGamepadAttackDown();
@@ -460,6 +515,7 @@ export class Joseph extends Phaser.Physics.Arcade.Sprite {
       this.isJumping ||
       this.isAttacking ||
       this.isHurt ||
+      this.isPickingUp ||
       currentTime < this.lastSpecialTime + SPECIAL_COOLDOWN_MS
     ) {
       return;
@@ -504,7 +560,8 @@ export class Joseph extends Phaser.Physics.Arcade.Sprite {
       this.isJumping ||
       this.isHurt ||
       this.isSpecialAttacking ||
-      this.isAttacking
+      this.isAttacking ||
+      this.isPickingUp
     ) {
       return;
     }
@@ -595,6 +652,7 @@ export class Joseph extends Phaser.Physics.Arcade.Sprite {
     this.specialHitTargets.clear();
     this.weaponHitThisAttack = false;
     this.attackAnimationType = 'special';
+    this.swingWeaponKind = null;
     this.soundFX?.playSpecial();
 
     this.setVelocity(0, 0);
@@ -649,7 +707,7 @@ export class Joseph extends Phaser.Physics.Arcade.Sprite {
     this.specialHitTargets.clear();
 
     if (this.anims.currentAnim?.key === 'joseph-attack') {
-      this.play('joseph-idle');
+      this.play(this.getIdleAnimationKey());
     }
   }
 
@@ -697,6 +755,13 @@ export class Joseph extends Phaser.Physics.Arcade.Sprite {
   }
 
   private performAttack(time: number): void {
+    const equipped = this.currentWeapon;
+
+    if (equipped && isThrowableWeapon(equipped.kind)) {
+      this.performThrowAttack(time, equipped.kind);
+      return;
+    }
+
     this.isAttacking = true;
     this.lastAttackTime = time;
     this.attackAnimationType = 'normal';
@@ -706,9 +771,25 @@ export class Joseph extends Phaser.Physics.Arcade.Sprite {
     this.soundFX?.playSlash();
 
     const direction: number = this.getFacingDirection();
+    const meleeKind = equipped?.kind ?? null;
+    const isBat = meleeKind === 'bat';
 
-    // Play the katana animation (5 frames at 15 fps)
-    this.play('joseph-attack', true);
+    // Each two-handed weapon has its own swing; unarmed Joseph keeps the
+    // katana animation.
+    this.swingWeaponKind = meleeKind;
+    this.setSwingHitbox(
+      isBat ? BAT_HITBOX_WIDTH : HITBOX_WIDTH,
+      isBat ? BAT_HITBOX_HEIGHT : HITBOX_HEIGHT,
+      isBat ? BAT_HITBOX_FORWARD_OFFSET : HITBOX_FORWARD_OFFSET
+    );
+
+    if (isBat) {
+      this.play('joseph-attack-bat', true);
+    } else if (meleeKind === 'pipe') {
+      this.play('joseph-attack-pipe', true);
+    } else {
+      this.play('joseph-attack', true);
+    }
 
     // Forward lunge (~30 px over 100 ms)
     const lungeSpeed: number = LUNGE_DISTANCE / (LUNGE_DURATION_MS / 1000);
@@ -723,11 +804,75 @@ export class Joseph extends Phaser.Physics.Arcade.Sprite {
   }
 
   /**
+   * Starts a bottle/knife throw. The weapon is not consumed here: it stays in
+   * hand until the release frame, which also keeps the HUD icon visible during
+   * the wind-up.
+   */
+  private performThrowAttack(time: number, kind: ThrowableWeaponKind): void {
+    this.isAttacking = true;
+    this.isThrowing = true;
+    this.throwReleased = false;
+    this.lastAttackTime = time;
+    this.attackAnimationType = 'throw';
+    this.swingWeaponKind = null;
+    this.hitTargetsThisAttack.clear();
+    this.weaponHitThisAttack = false;
+    this.setHitboxEnabled(false);
+    this.setVelocity(0, 0);
+    this.soundFX?.playSlash();
+
+    this.play(kind === 'bottle' ? 'joseph-throw-bottle' : 'joseph-throw-knife', true);
+  }
+
+  /**
+   * Consumes the equipped throwable on the release frame and lets the scene
+   * spawn the projectile. Safe to call more than once per throw.
+   */
+  private releaseThrow(): void {
+    if (!this.isThrowing || this.throwReleased || !this.currentWeapon) {
+      return;
+    }
+
+    const kind = this.currentWeapon.kind;
+    if (!isThrowableWeapon(kind)) {
+      return;
+    }
+
+    this.throwReleased = true;
+    this.currentWeapon = null;
+    this.onWeaponChanged?.(null);
+
+    const direction = this.getFacingDirection();
+    this.onWeaponThrown?.(kind, this.x + direction * 10, this.y - 26, direction);
+  }
+
+  /**
+   * Brief crouch used when Joseph picks a weapon up from the street.
+   */
+  public playPickup(): void {
+    if (
+      !this.active ||
+      this.isAttacking ||
+      this.isSpecialAttacking ||
+      this.isHurt ||
+      this.isJumping ||
+      this.isPickingUp
+    ) {
+      return;
+    }
+
+    this.isPickingUp = true;
+    this.setVelocity(0, 0);
+    this.weaponHitThisAttack = false;
+    this.play('joseph-pickup', true);
+  }
+
+  /**
    * Coloured arc that makes a street-weapon swing readable even though Joseph
    * reuses the katana animation frames.
    */
   private createWeaponSwingEffect(): void {
-    if (!this.currentWeapon) {
+    if (!this.currentWeapon || isThrowableWeapon(this.currentWeapon.kind)) {
       return;
     }
 
@@ -776,6 +921,23 @@ export class Joseph extends Phaser.Physics.Arcade.Sprite {
       return;
     }
 
+    if (anim.key === 'joseph-throw-bottle' || anim.key === 'joseph-throw-knife') {
+      // Frame 13/17 (index 2) is the first one where the object has left the
+      // hand, so the projectile spawns exactly when the throw happens.
+      if (this.attackAnimationType === 'throw' && frame.index >= 2) {
+        this.releaseThrow();
+      }
+      return;
+    }
+
+    if (anim.key === 'joseph-attack-pipe' || anim.key === 'joseph-attack-bat') {
+      if (this.attackAnimationType === 'normal') {
+        // Wind-up, contact, follow-through, recovery.
+        this.setHitboxEnabled(frame.index >= 2 && frame.index <= 3);
+      }
+      return;
+    }
+
     if (anim.key !== 'joseph-attack' || this.isSpecialAttacking) {
       return;
     }
@@ -796,13 +958,35 @@ export class Joseph extends Phaser.Physics.Arcade.Sprite {
       return;
     }
 
-    if (anim.key === 'joseph-attack') {
+    if (anim.key === 'joseph-pickup') {
+      this.isPickingUp = false;
+      return;
+    }
+
+    if (anim.key === 'joseph-throw-bottle' || anim.key === 'joseph-throw-knife') {
+      // Safety net in case the release frame event was skipped.
+      this.releaseThrow();
+      this.isThrowing = false;
+      this.throwReleased = false;
+      this.attackAnimationType = null;
+      this.isAttacking = false;
+      this.setHitboxEnabled(false);
+      this.setVelocityX(0);
+      return;
+    }
+
+    if (
+      anim.key === 'joseph-attack' ||
+      anim.key === 'joseph-attack-pipe' ||
+      anim.key === 'joseph-attack-bat'
+    ) {
       if (this.attackAnimationType === 'special') {
         this.attackAnimationType = null;
         return;
       }
 
       this.attackAnimationType = null;
+      this.swingWeaponKind = null;
       this.isAttacking = false;
       this.setHitboxEnabled(false);
       this.setVelocityX(0);
@@ -815,6 +999,15 @@ export class Joseph extends Phaser.Physics.Arcade.Sprite {
     const body: Phaser.Physics.Arcade.Body = this.hitbox.body as Phaser.Physics.Arcade.Body;
     body.enable = enabled;
     this.hitbox.setActive(enabled);
+  }
+
+  /** Resizes the normal-swing hitbox before an attack starts. */
+  private setSwingHitbox(width: number, height: number, forwardOffset: number): void {
+    this.hitboxForwardOffset = forwardOffset;
+
+    this.hitbox.setSize(width, height);
+    const body = this.hitbox.body as Phaser.Physics.Arcade.Body;
+    body.setSize(width, height, true);
   }
 
   private setJumpAttackHitboxEnabled(enabled: boolean): void {
@@ -905,9 +1098,18 @@ export class Joseph extends Phaser.Physics.Arcade.Sprite {
 
   /** Normal swings use the weapon damage; unarmed Joseph falls back to the katana. */
   public getAttackDamage(baseDamage: number): number {
-    return this.currentWeapon
-      ? WEAPON_DEFINITIONS[this.currentWeapon.kind].damage
-      : baseDamage;
+    // Keep the swing's weapon for its whole arc, even if the last use breaks
+    // the weapon partway through.
+    const kind =
+      this.attackAnimationType === 'normal'
+        ? this.swingWeaponKind
+        : this.currentWeapon?.kind;
+    return kind ? WEAPON_DEFINITIONS[kind].damage : baseDamage;
+  }
+
+  /** True while the current normal swing belongs to the wooden bat. */
+  public isBatSwing(): boolean {
+    return this.attackAnimationType === 'normal' && this.swingWeaponKind === 'bat';
   }
 
   /**
@@ -917,6 +1119,11 @@ export class Joseph extends Phaser.Physics.Arcade.Sprite {
    */
   public registerWeaponImpact(): void {
     if (!this.currentWeapon || this.weaponHitThisAttack) {
+      return;
+    }
+
+    // Throwables never connect as melee: they are spent by releaseThrow().
+    if (isThrowableWeapon(this.currentWeapon.kind)) {
       return;
     }
 
@@ -994,12 +1201,22 @@ export class Joseph extends Phaser.Physics.Arcade.Sprite {
     // into a WeaponItem that can be picked up again.
     this.dropWeapon();
 
+    // Interrupt a throw or pickup before its release/end frame.
+    this.isThrowing = false;
+    this.throwReleased = false;
+    this.isPickingUp = false;
+    if (this.attackAnimationType === 'throw') {
+      this.attackAnimationType = null;
+    }
+
     this.currentHealth = Math.max(0, this.currentHealth - damageData.damage);
     this.onHealthChanged?.(this.currentHealth, this.maxHealth);
     this.soundFX?.playPlayerHurt();
 
     this.isAttacking = false;
     this.setHitboxEnabled(false);
+    this.attackAnimationType = null;
+    this.swingWeaponKind = null;
     this.isHurt = true;
     this.play('joseph-hurt', true);
 

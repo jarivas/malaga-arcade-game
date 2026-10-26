@@ -199,46 +199,64 @@ El arte ya no se pinta por código. `public/assets/sprites/props_pickups.png` es
 - Cada textura conserva la proporción del recorte original; las cajas de colisión de los props siguen siendo 26 × 10 px (cubo) y 24 × 10 px (caja).
 - Los escombros son imágenes de 8 × 8 con escala, giro, volteo y trayectoria aleatorios, no rectángulos dibujados.
 
-#### Armas recogibles
+#### Armas y arrojadizos
 
-La hoja `public/assets/sprites/pickable_weapons.png` (1024 × 1024) contiene las armas tiradas, sus iconos de HUD y las esquirlas de cristal. `WeaponTextures.ts` la recorta en `create()` usando el mismo pipeline que los props (`TextureUtils.ts`), con dos claves de croma: magenta para el fondo general y azul para las tarjetas de los iconos.
+El sistema usa dos hojas:
+
+- `public/assets/sprites/pickable_weapons.png` (1024 × 1024): armas tiradas, iconos de HUD, esquirlas y los cuatro fotogramas de rotación de la botella y el cuchillo.
+- `public/assets/sprites/joseph_weapons.png` (384 × 480, 4 × 5 frames de 96 × 96): animaciones normalizadas de Joseph para recoger, mamporrear y lanzar. Se generó desde `assets/sprites/joseph_weapons.png` (1024 × 1024, retícula 4 columnas × 5 filas de 256 × 204,8 px) eliminando el croma magenta, los componentes sueltos de texto, alineando los pies a `y = 94` y aplicando una escala uniforme de 0.22.
+
+`WeaponTextures.ts` recorta la hoja de objetos en `create()` usando `TextureUtils.ts`, con croma magenta y croma azul para las tarjetas de los iconos. Las hojas de rotación se empaquetan como spritesheets uniformes de cuatro frames.
+
+La tubería y el bate del suelo **se dibujan por código** en `WeaponTextures.ts` (a 4× y reducidos con suavizado): el recorte fotorrealista de la hoja se convertía en una línea de 1–2 px imposible de identificar. Ahora van en diagonal, con contorno oscuro, volumen metálico/madera y un tamaño legible sobre el asfalto.
 
 | Clave | Región de origen | Tamaño final | Uso |
 | :--- | :--- | :--- | :--- |
-| `weapon-pipe` | tubería, `(33, 927)` 167 × 53 | 26 × 8 | Arma en el suelo |
-| `weapon-bottle` | botella verde, `(258, 238)` 98 × 123 | 11 × 14 | Arma en el suelo |
-| `weapon-bat` | bate de madera, `(29, 655)` 424 × 61 | 32 × 5 | Arma en el suelo |
-| `icon-pipe` | tarjeta azul, `(842, 42)` 120 × 120 | 16 × 16 | Icono del HUD |
-| `icon-bat` | tarjeta azul, `(485, 600)` 143 × 139 | 16 × 16 | Icono del HUD |
-| `icon-bottle` | tarjeta azul, `(506, 787)` 143 × 138 | 16 × 16 | Icono del HUD |
-| `fx-glass-shard` | esquirla, `(309, 443)` 37 × 38 | 8 × 8 | Partículas de la botella |
+| `weapon-pipe` | dibujada por código (tubería metálica diagonal) | 34 × 20 | Tubería en el suelo |
+| `weapon-bottle` | botella verde, `(258, 238)` 98 × 123 | 11 × 14 | Botella en el suelo |
+| `weapon-bat` | dibujado por código (bate de madera diagonal) | 36 × 22 | Bate en el suelo |
+| `weapon-knife` | cuchillo, `(512, 30)` 138 × 152 | 22 × 24 | Cuchillo en el suelo |
+| `icon-pipe` | tarjeta azul, `(494, 776)` 166 × 161 | 16 × 16 | Icono del HUD |
+| `icon-bottle` | tarjeta azul, `(831, 213)` 143 × 143 | 16 × 16 | Icono del HUD |
+| `icon-bat` | tarjeta azul, `(473, 589)` 167 × 161 | 16 × 16 | Icono del HUD |
+| `icon-knife` | tarjeta azul, `(831, 30)` 143 × 144 | 16 × 16 | Icono del HUD |
+| `fx-glass-shard` | esquirla, `(309, 443)` 37 × 38 | 8 × 8 | Impacto de la botella |
+| `fx-metal-spark` | textura procedural de 7 × 3 | 7 × 3 | Chispas del cuchillo |
+| `projectile-bottle` | 4 botellas giradas, `(259, 238)`, `(382, 243)`, `(527, 236)`, `(655, 244)` | 4 frames de 16 × 16 | Proyectil de botella |
+| `projectile-knife` | 4 cuchillos girados, `(285, 26)`, `(357, 22)`, `(512, 30)`, `(686, 30)` | 4 frames de 20 × 20 | Proyectil de cuchillo |
 
-Hay ocho armas repartidas por la calle:
+Hay nueve armas repartidas por la calle:
 
 | Posición | Arma |
 | :--- | :--- |
 | `(150, 214)` | Tubería |
 | `(352, 166)` | Botella |
 | `(430, 238)` | Bate |
-| `(520, 150)` | Bate |
+| `(520, 150)` | Cuchillo |
+| `(640, 210)` | Cuchillo |
 | `(760, 238)` | Botella |
 | `(1080, 168)` | Tubería |
 | `(1200, 238)` | Bate |
-| `(1340, 164)` | Botella |
+| `(1340, 164)` | Cuchillo |
 
-| Arma | Usos | Daño por tajo |
-| :--- | :---: | :---: |
-| Tubería | 5 | 30 |
-| Botella | 3 | 45 |
-| Bate | 4 | 40 |
+| Arma | Tipo | Usos | Daño |
+| :--- | :--- | :---: | :---: |
+| Tubería | Cuerpo a cuerpo a dos manos | 5 | 30 |
+| Bate | Cuerpo a cuerpo a dos manos | 5 | 40 |
+| Botella | Arrojadiza | 1 | 35 |
+| Cuchillo | Arrojadiza | 1 | 35 |
 
-- Son pickups de solapamiento: no bloquean el movimiento de Joseph ni de los enemigos.
-- Al recogerlos, el objeto desaparece del suelo y Joseph equipa el arma. El HUD muestra su icono y los usos restantes junto a `1P JOSEPH` (por ejemplo, `[tubería] x5`).
-- Se usan con el **ataque normal**: `J` en teclado o el botón `A` del mando. No hay una tecla extra; el arma sustituye el daño del tajo y cada impacto gasta un uso. Al equiparla aparece un aviso `J / A PARA ATACAR` y el tajo deja un arco de color según el arma.
-- El tajo normal usa el daño del arma. El primer impacto de cada ataque gasta un uso; el especial y el tajo aéreo también gastan uno por ataque aunque mantienen su daño base.
-- Cuando los usos llegan a 0, el arma se rompe: se borra el icono del HUD y Joseph vuelve a la katana. Si era una botella, estalla en esquirlas `fx-glass-shard`; cada impacto de botella también suelta unas pocas.
-- Si Joseph recibe daño mientras lleva un arma, la suelta en el suelo con los usos que le quedaban y vuelve a la katana. El arma soltada no puede recogerse hasta que Joseph se aleja al menos 28 px, para que no vuelva a equiparla al instante.
-- Las armas del suelo **no caducan**: mientras conserven usos, permanecen ahí hasta que se recogen. La única forma de que desaparezcan es recogerlas o romperlas.
+- Son pickups de solapamiento: no bloquean el movimiento de Joseph ni de los enemigos. Al recogerlos, el objeto desaparece del suelo, Joseph reproduce `joseph-pickup` (frames 0–3) y el HUD muestra el icono con los usos restantes junto a `1P JOSEPH` (por ejemplo, `[tubería] x5`).
+- Mientras lleva un arma y se queda quieto, el idle usa una pose de esa arma: `joseph-idle-pipe` (frame 7), `joseph-idle-bat` (frame 11), `joseph-idle-bottle` (frame 12) o `joseph-idle-knife` (frame 16), todas de `joseph-weapons`. Así no aparece la pose de katana de `joseph-idle`. Al lanzar el arma o perderla, vuelve a `joseph-idle`.
+- **Tubería** se usa con el ataque normal (`J` o botón `A`) y reproduce `joseph-attack-pipe` (frames 4–7, 15 fps). El primer impacto de cada ataque gasta un uso; al llegar a 0 el arma se rompe, se borra el icono del HUD y vuelve la katana.
+- **Bate** reproduce `joseph-attack-bat` (frames 8–11, 15 fps) y usa una hitbox frontal de 75 px (algo más alta que la normal) con 40 HP y **knockdown automático**: el infectado sale despedido horizontalmente. También tiene 5 usos; al romperse emite astillas `fx-debris-wood` y el sonido de rotura (`playBreak()`).
+- El especial y el tajo aéreo también gastan un uso de la tubería o del bate.
+- **Botella y cuchillo** se lanzan con el ataque normal. Joseph reproduce `joseph-throw-bottle` (frames 12–15, 18 fps) o `joseph-throw-knife` (frames 16–19, 18 fps); en el último frame de la animación consume el objeto (`currentWeapon = null`), borra el icono del HUD y crea el proyectil.
+- `joseph-pickup` usa los frames 0–3 a 12 fps.
+- El proyectil sale de la mano con `vx = ±500` y `vy = 0`, siempre en línea recta horizontal, mientras reproduce su animación de cuatro frames de rotación a 24 fps. Se destruye al impactar, a los 2,5 s o al salir del escenario.
+- Al tocar a un infectado le causa **35 HP** y lo derriba con un retroceso horizontal corto. La botella genera esquirlas verdes `fx-glass-shard`; el cuchillo genera chispas metálicas `fx-metal-spark`. El proyectil se destruye en el primer impacto.
+- Si Joseph recibe daño mientras lleva un arma sin lanzar, la suelta en el suelo con los usos que le quedaban y vuelve a la katana. El arma soltada no puede recogerse hasta que Joseph se aleja al menos 28 px.
+- Las armas del suelo **no caducan**: mientras conserven usos, permanecen ahí hasta que se recogen. La única forma de que desaparezcan es recogerlas, romperlas o lanzarlas.
 
 ### Tipos de combate
 En `src/types/combat.ts`:
@@ -256,6 +274,7 @@ gripe/ (raíz del proyecto)
 │   └── sprites/
 │       ├── joseph_original.png   # Hoja original de referencia de Joseph
 │       ├── joseph_jump_spritesheet.png # Hoja original de salto
+│       ├── joseph_weapons.png    # Hoja original de recogida/ataque/lanzamiento
 │       ├── props_pickups.png     # Hoja original de props y consumibles
 │       ├── pickable_weapons.png  # Hoja original de armas e iconos
 │       └── enemy.png             # Hoja original de referencia del enemigo
@@ -266,8 +285,9 @@ gripe/ (raíz del proyecto)
 │       ├── sprites/
 │       │   ├── joseph.png        # Hoja normalizada de Joseph (96 × 96)
 │       │   ├── joseph_jump.png   # Hoja de salto normalizada (96 × 96, 5 × 2)
+│       │   ├── joseph_weapons.png # Acciones de armas normalizadas (96 × 96, 4 × 5)
 │       │   ├── props_pickups.png # Hoja de props, consumibles y escombros
-│       │   ├── pickable_weapons.png # Hoja de armas, iconos y esquirlas
+│       │   ├── pickable_weapons.png # Hoja de armas, iconos y rotaciones
 │       │   └── enemy.png         # Hoja normalizada del enemigo (96 × 96)
 │       └── ui/
 │           ├── portrait_joseph.png # Retrato 64 × 64 con fondo transparente
@@ -283,10 +303,11 @@ gripe/ (raíz del proyecto)
 │   │   └── objects/
 │   │       ├── BreakableObject.ts  # Cubos/cajas destructibles y escombros
 │   │       ├── PickupItem.ts       # Consumibles, arco de aparición y parpadeo
-│   │       ├── WeaponItem.ts       # Armas tiradas, usos y parpadeo
+│   │       ├── WeaponItem.ts       # Armas tiradas, usos y recogida
+│   │       ├── WeaponProjectile.ts # Botella/cuchillo lanzados, daño y giro
 │   │       ├── TextureUtils.ts     # Croma y reescalado de hojas de sprites
 │   │       ├── PropTextures.ts     # Recorte de props, consumibles y escombros
-│   │       └── WeaponTextures.ts   # Recorte de armas, iconos y esquirlas
+│   │       └── WeaponTextures.ts   # Recorte de armas, iconos y rotaciones
 │   ├── scenes/
 │   │   └── TestArenaScene.ts
 │   ├── types/
@@ -329,12 +350,15 @@ La hoja de salto `assets/sprites/joseph_jump_spritesheet.png` mide 1024 × 1024,
 
 La hoja `assets/sprites/props_pickups.png` (1024 × 1024) contiene los props, los tres consumibles y las ilustraciones de escombros sobre fondo magenta. Se copió a `public/assets/sprites/props_pickups.png` y se recorta en tiempo de ejecución; no requiere normalización previa. El croma, los tamaños y las regiones exactas están documentados en “Arte de props y consumibles”.
 
-La hoja `assets/sprites/pickable_weapons.png` (1024 × 1024) contiene las armas tiradas, sus iconos de HUD sobre tarjetas azules y las esquirlas de cristal. Se copió a `public/assets/sprites/pickable_weapons.png` y se recorta en tiempo de ejecución con `WeaponTextures.ts`; las regiones y el doble croma están documentados en “Armas recogibles”.
+La hoja `assets/sprites/joseph_weapons.png` (1024 × 1024, v5) contiene 20 poses de Joseph en una retícula de 4 columnas × 5 filas de 256 × 204,8 px sobre fondo magenta, más algunos objetos sueltos (botella y cuchillo en el aire). Se normalizó a `public/assets/sprites/joseph_weapons.png` (384 × 480, 4 columnas × 5 filas de 96 × 96): se eliminó el croma magenta y el halo, se descartaron los componentes menores, se agruparon las poses y objetos por celda, se alinearon los pies a `y = 94` y se aplicó una escala uniforme de 0.22. Los frames 0–19 se usan en el orden solicitado.
+
+La hoja `assets/sprites/pickable_weapons.png` (1024 × 1024) contiene las armas tiradas, sus iconos de HUD sobre tarjetas azules, las esquirlas de cristal y cuatro fotogramas de rotación para la botella y el cuchillo. Se copió a `public/assets/sprites/pickable_weapons.png` y se recorta en tiempo de ejecución con `WeaponTextures.ts`; las regiones, el doble croma y los spritesheets de rotación están documentados en “Armas y arrojadizos”.
 
 Las hojas originales no tenían una rejilla uniforme: `assets/sprites/joseph_original.png` incluía fondo gris opaco, etiquetas de texto y distintos anchos por pose, y `assets/sprites/enemy.png` tenía cuatro filas de animación, título y una marca de agua. Para poder usarlas en Phaser se generaron versiones normalizadas y transparentes:
 
 - `public/assets/sprites/joseph.png`: 96 × 96 px por frame, 5 columnas × 5 filas, 23 frames.
 - `public/assets/sprites/joseph_jump.png`: 96 × 96 px por frame, 5 columnas × 2 filas, 9 frames útiles (0–8).
+- `public/assets/sprites/joseph_weapons.png`: 96 × 96 px por frame, 4 columnas × 5 filas, 20 frames útiles (0–19).
 - `public/assets/sprites/enemy.png`: 96 × 96 px por frame, 5 columnas × 5 filas, 21 frames.
 - Todas las animaciones están empaquetadas de forma contigua para que los índices de frame coincidan con los solicitados.
 - Eliminación del fondo, del halo gris del contorno y de la marca de agua.
@@ -347,8 +371,9 @@ Las hojas originales no tenían una rejilla uniforme: `assets/sprites/joseph_ori
 - El HUD es funcional, pero no incluye minimapa ni pantalla de game over. El contador de vidas es fijo (`x2`) porque todavía no hay pérdida de vidas.
 - Los contenedores, bolsas y farolas del fondo están horneados en la imagen: no tienen colisión ni profundidad individual. Los nueve props rompibles son sprites aparte, pero el resto del mobiliario urbano sigue siendo decorativo.
 - Los recortes de `props_pickups.png` están ajustados a mano a las regiones de esa hoja concreta. Si se sustituye la imagen por otra generación, hay que revisar las coordenadas de `REGIONS` en `PropTextures.ts`.
-- Lo mismo ocurre con `pickable_weapons.png`: las regiones de `WeaponTextures.ts` y el recorte azul de los iconos dependen de esta hoja concreta.
-- Los tres tipos de arma comparten las animaciones de katana de Joseph; no hay animaciones propias de tubería, botella o bate.
+- Lo mismo ocurre con `pickable_weapons.png`: las regiones de `WeaponTextures.ts`, el recorte azul de los iconos y los fotogramas de rotación dependen de esta hoja concreta.
+- La hoja normalizada `joseph_weapons.png` conserva los objetos dibujados en el aire de los frames 13–14 (botella) y 17–18 (cuchillo). El proyectil real se crea en el primer frame en que el objeto ya ha salido de la mano (13/17), por lo que durante un par de frames pueden verse el objeto pintado y el proyectil superpuestos.
+- Cada arma tiene su propia animación de ataque y de reposo; el bate ya no comparte la de la tubería. Las poses de idle son estáticas (un solo frame) porque la hoja no incluye una secuencia de respiración por arma.
 - El enemigo no ataca todavía, así que la pérdida del arma por daño solo se puede probar llamando a `takeDamage()` directamente.
 - Los props no reaparecen y los consumibles dependen de una tirada aleatoria (80 %). Si no cae ninguno, el jugador no tiene curación garantizada tras la oleada.
 - Solo los nueve props colocados son destructibles; no hay un sistema genérico de objetos rompibles colocado por datos de nivel.

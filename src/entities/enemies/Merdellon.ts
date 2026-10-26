@@ -13,6 +13,11 @@ const SPECIAL_KNOCKBACK_DURATION_MS = 300;
 const SPECIAL_KNOCKDOWN_MS = 800;
 const AERIAL_KNOCKBACK_SPEED = 170;
 const AERIAL_KNOCKDOWN_MS = 700;
+const PROJECTILE_KNOCKBACK_SPEED = 190;
+const PROJECTILE_KNOCKDOWN_MS = 650;
+// Wooden bat: a heavy horizontal blow that sends the infected flying.
+const BAT_KNOCKBACK_SPEED = 300;
+const BAT_KNOCKDOWN_MS = 750;
 const DEATH_FADE_DELAY_MS = 500;
 const DEATH_FADE_MS = 500;
 // The artwork has its feet 2 px above the bottom of each 96x96 cell
@@ -149,6 +154,31 @@ export class Merdellon extends Phaser.Physics.Arcade.Sprite {
       dirY,
       AERIAL_KNOCKBACK_SPEED,
       AERIAL_KNOCKDOWN_MS
+    );
+  }
+
+  /** Thrown bottle or knife: damage plus a short horizontal knockdown. */
+  public takeProjectileDamage(amount: number, dirX: number): void {
+    this.takeKnockdownDamage(
+      amount,
+      dirX,
+      0,
+      PROJECTILE_KNOCKBACK_SPEED,
+      PROJECTILE_KNOCKDOWN_MS
+    );
+  }
+
+  /**
+   * Wooden-bat blow: damage plus a strong horizontal knockdown that launches
+   * the infected away from Joseph.
+   */
+  public takeBatDamage(amount: number, dirX: number): void {
+    this.takeKnockdownDamage(
+      amount,
+      dirX,
+      0,
+      BAT_KNOCKBACK_SPEED,
+      BAT_KNOCKDOWN_MS
     );
   }
 
