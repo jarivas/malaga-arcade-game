@@ -119,6 +119,7 @@ export class Joseph extends Phaser.Physics.Arcade.Sprite {
   private wasGamepadJumpDown = false;
   private attackAnimationType: 'normal' | 'jump' | 'special' | 'throw' | null = null;
   private isPickingUp = false;
+  private pickupFrameNotified = false;
   private isThrowing = false;
   private throwReleased = false;
   private readonly jumpShadow: Phaser.GameObjects.Ellipse;
@@ -157,6 +158,18 @@ export class Joseph extends Phaser.Physics.Arcade.Sprite {
     y: number,
     direction: number
   ) => void;
+
+  /**
+   * Callback invoked on frame 1 of the pickup animation, the pose where the
+   * hand reaches the item. The scene equips and removes the pickup there.
+   */
+  public onPickupFrame?: () => void;
+
+  /**
+   * Callback invoked when a pickup is interrupted before its contact frame
+   * (for example by damage). The scene keeps the item on the ground.
+   */
+  public onPickupCancelled?: () => void;
 
   private currentWeapon: EquippedWeapon | null = null;
   private weaponHitThisAttack = false;
@@ -848,8 +861,9 @@ export class Joseph extends Phaser.Physics.Arcade.Sprite {
 
   /**
    * Brief crouch used when Joseph picks a weapon up from the street.
+   * Returns false when he is busy and the pickup must not start.
    */
-  public playPickup(): void {
+  public playPickup(): boolean {
     if (
       !this.active ||
       this.isAttacking ||
@@ -858,13 +872,15 @@ export class Joseph extends Phaser.Physics.Arcade.Sprite {
       this.isJumping ||
       this.isPickingUp
     ) {
-      return;
+      return false;
     }
 
     this.isPickingUp = true;
+    this.pickupFrameNotified = false;
     this.setVelocity(0, 0);
     this.weaponHitThisAttack = false;
     this.play('joseph-pickup', true);
+    return true;
   }
 
   /**
@@ -921,6 +937,15 @@ export class Joseph extends Phaser.Physics.Arcade.Sprite {
       return;
     }
 
+    if (anim.key === 'joseph-pickup') {
+      // The hand reaches the item on the second pose (frame 1).
+      if (!this.pickupFrameNotified && frame.index >= 1) {
+        this.pickupFrameNotified = true;
+        this.onPickupFrame?.();
+      }
+      return;
+    }
+
     if (anim.key === 'joseph-throw-bottle' || anim.key === 'joseph-throw-knife') {
       // Frame 13/17 (index 2) is the first one where the object has left the
       // hand, so the projectile spawns exactly when the throw happens.
@@ -932,8 +957,9 @@ export class Joseph extends Phaser.Physics.Arcade.Sprite {
 
     if (anim.key === 'joseph-attack-pipe' || anim.key === 'joseph-attack-bat') {
       if (this.attackAnimationType === 'normal') {
-        // Wind-up, contact, follow-through, recovery.
-        this.setHitboxEnabled(frame.index >= 2 && frame.index <= 3);
+        // The contact frame is the third pose of each swing: absolute frame 6
+        // for the pipe (4-7) and frame 10 for the bat (8-11).
+        this.setHitboxEnabled(frame.index === 2);
       }
       return;
     }
@@ -959,6 +985,11 @@ export class Joseph extends Phaser.Physics.Arcade.Sprite {
     }
 
     if (anim.key === 'joseph-pickup') {
+      // Fallback for a skipped frame event: never leave the scene waiting.
+      if (!this.pickupFrameNotified) {
+        this.pickupFrameNotified = true;
+        this.onPickupFrame?.();
+      }
       this.isPickingUp = false;
       return;
     }
@@ -1202,9 +1233,13 @@ export class Joseph extends Phaser.Physics.Arcade.Sprite {
     this.dropWeapon();
 
     // Interrupt a throw or pickup before its release/end frame.
+    const wasPickingUp = this.isPickingUp;
     this.isThrowing = false;
     this.throwReleased = false;
     this.isPickingUp = false;
+    if (wasPickingUp && !this.pickupFrameNotified) {
+      this.onPickupCancelled?.();
+    }
     if (this.attackAnimationType === 'throw') {
       this.attackAnimationType = null;
     }

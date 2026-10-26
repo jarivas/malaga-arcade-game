@@ -5,7 +5,8 @@ import {
   PROJECTILE_KNIFE_TEXTURE
 } from './WeaponTextures';
 
-const PROJECTILE_SPEED = 500;
+const BOTTLE_SPEED = 500;
+const KNIFE_SPEED = 600;
 const PROJECTILE_LIFETIME_MS = 2500;
 const BOTTLE_BODY_WIDTH = 8;
 const BOTTLE_BODY_HEIGHT = 20;
@@ -19,10 +20,11 @@ export const PROJECTILE_KNIFE_ANIM = 'projectile-knife-spin';
 
 /**
  * A thrown bottle or knife. It always travels in a straight horizontal line
- * (vy = 0) while its four-frame rotation animation spins the artwork.
+ * (vy = 0) while its two-frame rotation animation spins the artwork.
  *
- * Collision, damage, knockdown and the impact burst are handled by the scene
- * so the projectile stays a small, reusable physics object.
+ * The knife is faster than the bottle. Collision, damage, knockdown and the
+ * impact burst are handled by the scene so the projectile stays a small,
+ * reusable physics object.
  */
 export class WeaponProjectile extends Phaser.Physics.Arcade.Sprite {
   public readonly kind: ThrowableWeaponKind;
@@ -57,7 +59,8 @@ export class WeaponProjectile extends Phaser.Physics.Arcade.Sprite {
     body.setSize(width, height, true);
     body.setAllowGravity(false);
     body.setImmovable(true);
-    body.setVelocity(direction * PROJECTILE_SPEED, 0);
+    const speed = kind === 'bottle' ? BOTTLE_SPEED : KNIFE_SPEED;
+    body.setVelocity(direction * speed, 0);
 
     this.setDepth(y + 0.8);
     this.setFlipX(direction < 0);

@@ -129,6 +129,11 @@ export class TestArenaScene extends Phaser.Scene {
     WeaponItem,
     Phaser.Physics.Arcade.Collider
   >();
+  private pendingWeaponPickup: {
+    item: WeaponItem;
+    kind: WeaponKind;
+    uses: number;
+  } | null = null;
   private readonly projectiles: WeaponProjectile[] = [];
   private readonly projectileOverlaps = new Map<
     WeaponProjectile,
@@ -285,6 +290,12 @@ export class TestArenaScene extends Phaser.Scene {
     this.player.onWeaponThrown = (kind, x, y, direction) => {
       this.spawnProjectile(kind, x, y, direction);
     };
+    this.player.onPickupFrame = () => {
+      this.completeWeaponPickup();
+    };
+    this.player.onPickupCancelled = () => {
+      this.pendingWeaponPickup = null;
+    };
 
     // Breakable recovery props and their pickups.
     this.createBreakableProps();
@@ -296,6 +307,9 @@ export class TestArenaScene extends Phaser.Scene {
       this.player.onWeaponChanged = undefined;
       this.player.onWeaponLost = undefined;
       this.player.onWeaponThrown = undefined;
+      this.player.onPickupFrame = undefined;
+      this.player.onPickupCancelled = undefined;
+      this.pendingWeaponPickup = null;
       for (const overlap of this.pickupOverlaps.values()) {
         overlap.destroy();
       }
@@ -435,15 +449,40 @@ export class TestArenaScene extends Phaser.Scene {
       !item.active ||
       item.isCollected() ||
       !item.canBeCollected(this.player.x, this.player.y) ||
+      this.player.hasWeapon() ||
+      this.pendingWeaponPickup
+    ) {
+      return;
+    }
+
+    if (!this.player.playPickup()) {
+      return;
+    }
+
+    // The weapon is equipped and the pickup removed on frame 1 of the crouch.
+    this.pendingWeaponPickup = {
+      item,
+      kind: item.kind,
+      uses: item.uses
+    };
+  }
+
+  private completeWeaponPickup(): void {
+    const pending = this.pendingWeaponPickup;
+    this.pendingWeaponPickup = null;
+
+    if (
+      !pending ||
+      !pending.item.active ||
+      pending.item.isCollected() ||
       this.player.hasWeapon()
     ) {
       return;
     }
 
-    this.player.equipWeapon(item.kind, item.uses);
-    this.player.playPickup();
+    this.player.equipWeapon(pending.kind, pending.uses);
     this.soundFX.playPickup();
-    item.collect();
+    pending.item.collect();
   }
 
   private spawnProjectile(
@@ -1202,7 +1241,7 @@ export class TestArenaScene extends Phaser.Scene {
 
     this.anims.create({
       key: 'joseph-idle-bat',
-      frames: this.anims.generateFrameNumbers('joseph-weapons', { start: 11, end: 11 }),
+      frames: this.anims.generateFrameNumbers('joseph-weapons', { start: 8, end: 8 }),
       frameRate: 1,
       repeat: -1
     });
@@ -1249,24 +1288,26 @@ export class TestArenaScene extends Phaser.Scene {
       repeat: 0
     });
 
-    // Four-frame rotation sheets for the thrown objects.
+    // Two alternating rotation frames per thrown object: the bottle spins at
+    // 12 fps and the knife at 15 fps. The knife skips the first pose, which is
+    // an almost edge-on 3 px sliver and reads as a stick in flight.
     this.anims.create({
       key: PROJECTILE_BOTTLE_ANIM,
       frames: this.anims.generateFrameNumbers(PROJECTILE_BOTTLE_TEXTURE, {
         start: 0,
-        end: 3
+        end: 1
       }),
-      frameRate: 24,
+      frameRate: 12,
       repeat: -1
     });
 
     this.anims.create({
       key: PROJECTILE_KNIFE_ANIM,
       frames: this.anims.generateFrameNumbers(PROJECTILE_KNIFE_TEXTURE, {
-        start: 0,
-        end: 3
+        start: 1,
+        end: 2
       }),
-      frameRate: 24,
+      frameRate: 15,
       repeat: -1
     });
 
